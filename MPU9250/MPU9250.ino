@@ -7,7 +7,7 @@
 #include <freertos/task.h>
 
 // MPU9250 센서 객체 생성
-MPU9250 mpu;
+MPU9250 IMU;
 
 // Madgwick 필터 객체 생성
 Madgwick filter;
@@ -42,14 +42,14 @@ void IMUTask(void * parameter) {
   while(true) {
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
     
-    if (mpu.update()) {
+    if (IMU.update()) {
       // IMU 데이터 읽기 및 필터링
-      float gx = mpu.getGyroX();
-      float gy = mpu.getGyroY();
-      float gz = mpu.getGyroZ();
-      float ax = mpu.getAccX();
-      float ay = mpu.getAccY();
-      float az = mpu.getAccZ();
+      float gx = IMU.getGyroX();
+      float gy = IMU.getGyroY();
+      float gz = IMU.getGyroZ();
+      float ax = IMU.getAccX();
+      float ay = IMU.getAccY();
+      float az = IMU.getAccZ();
       
       filter.updateIMU(gx, gy, gz, ax, ay, az);
       
@@ -108,7 +108,7 @@ void setup() {
   Wire.begin();
   
   // MPU9250 초기화
-  mpu.setup(0x68);
+  IMU.setup(0x68);
   
   // Madgwick 필터 초기화
   filter.begin(100); // 100Hz 샘플링 레이트
@@ -121,9 +121,9 @@ void setup() {
   pinMode(SWITCH_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(SWITCH_PIN), switchISR, FALLING);
   
-  // PWM 핀 설정
-  ledcSetup(0, 5000, 8); // 채널 0, 5kHz PWM, 8-bit 해상도
-  ledcAttachPin(PWM_PIN, 0);
+  // PWM 핀 설정 부분 오류 발생
+  //ledcSetup(0, 5000, 8); // 채널 0, 5kHz PWM, 8-```bit 해상도
+  //ledcAttachPin(PWM_PIN, 0);
   
   // IMU 태스크 생성
   xTaskCreatePinnedToCore(
