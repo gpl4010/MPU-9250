@@ -19,10 +19,10 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 BluetoothSerial SerialBT;
 
 // 스위치 핀 정의
-const int SWITCH_PIN = 4;
+const int SWITCH_PIN = 14;
 
 // PWM 핀 정의
-const int PWM_PIN = 5;
+const int PWM_PIN = 27;
 
 // 전역 변수
 float roll, pitch, yaw;
@@ -84,6 +84,13 @@ void IMUTask(void * parameter) {
           break;
       }
     }
+    else {
+      Serial.println("Error: Failed to update IMU data");
+      SerialBT.println("Error: Failed to update IMU data");
+      lcd.clear();
+      lcd.print("IMU Error");
+      vTaskDelay(pdMS_TO_TICKS(1000)); // 1초 대기
+    }
 
     if (calibrateFlag) {
       offsetRoll = filter.getRoll();
@@ -102,13 +109,28 @@ void IRAM_ATTR switchISR() {
   calibrateFlag = true;
 }
 
+
 void setup() {
   Serial.begin(115200);
-  SerialBT.begin("ESP32_IMU");
+  if (!SerialBT.begin("ESP32_IMU")) {
+    Serial.println("Error: Bluetooth initialization failed");
+    while (1) {
+      delay(1000);
+    }
+  }
+  
   Wire.begin();
   
   // MPU9250 초기화
-  IMU.setup(0x68);
+  if (!IMU.setup(0x68)) {
+    Serial.println("Error: MPU9250 initialization failed");
+    lcd.init();
+    lcd.backlight();
+    lcd.print("MPU9250 Error");
+    while (1) {
+      delay(1000);
+    }
+  }
   
   // Madgwick 필터 초기화
   filter.begin(100); // 100Hz 샘플링 레이트
@@ -121,12 +143,10 @@ void setup() {
   pinMode(SWITCH_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(SWITCH_PIN), switchISR, FALLING);
   
-  // PWM 핀 설정 부분 오류 발생
-  //ledcSetup(0, 5000, 8); // 채널 0, 5kHz PWM, 8-```bit 해상도
-  //ledcAttachPin(PWM_PIN, 0);
+  // PWM 핀 설정코드 추가 필요
   
   // IMU 태스크 생성
-  xTaskCreatePinnedToCore(
+  BaseType_t xReturned = xTaskCreatePinnedToCore(
     IMUTask,        // 태스크 함수
     "IMUTask",      // 태스크 이름
     10000,          // 스택 크기
@@ -135,9 +155,13 @@ void setup() {
     &IMUTaskHandle, // 태스크 핸들
     0               // 실행할 코어 (0 or 1)
   );
+
+  if (xReturned != pdPASS) {
+    Serial.println("Error: Failed to create IMU task");
+    while (1) {}
+  }
 }
 
 void loop() {
-  // 메인 루프는 비어 있음
-  vTaskDelay(1000 / portTICK_PERIOD_MS);
+  vTaskDelay(pdMS_TO_TICKS(100));
 }
