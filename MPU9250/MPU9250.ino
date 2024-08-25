@@ -29,6 +29,7 @@ const int PWM_PIN = 27;
 const int PWM_CHANNEL = 0;
 const int PWM_FREQ = 5000;
 const int PWM_RESOLUTION = 8;
+int pwmValue = 0;
 
 // 전역 변수
 float roll, pitch, yaw;
@@ -52,7 +53,7 @@ void IRAM_ATTR onTimer(void* arg) {
 
 void IMUTask(void * parameter) {
     while(true) {
-        // 타이머 인터럽트를 기다립니다
+        // 타이머 인터럽트 대기
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         
         if (IMU.update()) {
@@ -70,8 +71,7 @@ void IMUTask(void * parameter) {
             pitch = filter.getPitch() - offsetPitch;
             yaw = filter.getYaw() - offsetYaw;
             
-            // PWM 값 계산 (예: roll 각도에 비례)
-            int pwmValue = map(abs((int)roll), 0, 180, 0, 255);
+            //LED 출력
             ledcWrite(PWM_CHANNEL, pwmValue);
             
             // UART 출력
@@ -91,14 +91,17 @@ void IMUTask(void * parameter) {
                 case 0:
                     lcd.print("Roll: ");
                     lcd.print(roll, 2);
+                    pwmValue = map(abs((int)roll), 0, 180, 0, 255);
                     break;
                 case 1:
                     lcd.print("Pitch: ");
                     lcd.print(pitch, 2);
+                    pwmValue = map(abs((int)pitch), 0, 180, 0, 255);
                     break;
                 case 2:
                     lcd.print("Yaw: ");
                     lcd.print(yaw, 2);
+                    pwmValue = map(abs((int)yaw), 0, 180, 0, 255);
                     break;
             }
         }
@@ -212,8 +215,8 @@ void setup() {
     // 스위치 핀 설정
     pinMode(SWITCH_PIN, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(SWITCH_PIN), switchISR, FALLING);
-
-    // PWM 설정
+    
+    // PWM 설정 오류 수정 필요
     //ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
     //ledcAttachPin(PWM_PIN, PWM_CHANNEL);
     
@@ -225,11 +228,11 @@ void setup() {
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(timer, 40000));
     
-    //안내 메시지 출력
+    // 안내 메시지 출력
     Serial.println("IMU System initialized. Type 'h' for available commands.");
     SerialBT.println("IMU System initialized. Type 'h' for available commands.");
 
-    // IMU 태스크 생성
+    // 태스크 생성
     xTaskCreatePinnedToCore(
         IMUTask,
         "IMUTask",      
@@ -243,6 +246,7 @@ void setup() {
 
 void loop() {
   if (Serial.available()) {
+    //데이터 입력
         char cmd = Serial.read();
         handleCommand(cmd, true);
     }
