@@ -20,15 +20,10 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 BluetoothSerial SerialBT;
 
 // 스위치 핀 정의
-const int SWITCH_PIN = 14;
+const int SWITCH_PIN = 12;
 
-// PWM 핀 정의
-const int PWM_PIN = 27;
-
-// PWM 설정
-const int PWM_CHANNEL = 0;
-const int PWM_FREQ = 5000;
-const int PWM_RESOLUTION = 8;
+// LED PWM 핀 정의
+const int PWM_PIN = 2;
 int pwmValue = 0;
 
 // 전역 변수
@@ -72,7 +67,7 @@ void IMUTask(void * parameter) {
             yaw = filter.getYaw() - offsetYaw;
             
             //LED 출력
-            ledcWrite(PWM_CHANNEL, pwmValue);
+            analogWrite(PWM_PIN, (pwmValue%255));
             
             // UART 출력
             Serial.printf("Roll: %.2f, Pitch: %.2f, Yaw: %.2f, PWM: %d\n", roll, pitch, yaw, pwmValue);
@@ -216,9 +211,8 @@ void setup() {
     pinMode(SWITCH_PIN, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(SWITCH_PIN), switchISR, FALLING);
     
-    // PWM 설정 오류 수정 필요
-    //ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RESOLUTION);
-    //ledcAttachPin(PWM_PIN, PWM_CHANNEL);
+    // PWM 설정
+    pinMode(PWM_PIN, OUTPUT);
     
     // 40ms 타이머 설정
     const esp_timer_create_args_t timer_args = {
