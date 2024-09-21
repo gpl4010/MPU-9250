@@ -15,6 +15,8 @@ Madgwick filter;
 
 // I2C LCD 객체 생성 (주소 0x27, 16열 2행)
 LiquidCrystal_I2C lcd(0x27, 16, 2);
+unsigned long lastLcdUpdate = 0;
+const unsigned long LCD_UPDATE_INTERVAL = 1000;
 
 // Bluetooth 시리얼 객체 생성
 BluetoothSerial SerialBT;
@@ -77,28 +79,36 @@ void IMUTask(void * parameter) {
                 SerialBT.printf("Roll: %.2f, Pitch: %.2f, Yaw: %.2f, PWM: %d\n", roll, pitch, yaw, pwmValue);
             }
             
-            // LCD 표시
-            lcd.clear();
-            lcd.setCursor(0, 0);
-            lcd.print("Angle:");
-            lcd.setCursor(0, 1);
-            switch (displayMode) {
-                case 0:
-                    lcd.print("Roll: ");
-                    lcd.print(roll, 2);
-                    pwmValue = map(abs((int)roll), 0, 180, 0, 255);
-                    break;
-                case 1:
-                    lcd.print("Pitch: ");
-                    lcd.print(pitch, 2);
-                    pwmValue = map(abs((int)pitch), 0, 180, 0, 255);
-                    break;
-                case 2:
-                    lcd.print("Yaw: ");
-                    lcd.print(yaw, 2);
-                    pwmValue = map(abs((int)yaw), 0, 180, 0, 255);
-                    break;
+            // 현재 시간 체크
+            unsigned long currentMillis = millis();
+
+            // LCD 업데이트 (1초마다)
+            if (currentMillis - lastLcdUpdate >= LCD_UPDATE_INTERVAL) {
+                lastLcdUpdate = currentMillis;
+                
+                lcd.clear();
+                lcd.setCursor(0, 0);
+                lcd.print("Angle:");
+                lcd.setCursor(0, 1);
+                switch (displayMode) {
+                    case 0:
+                        lcd.print("Roll: ");
+                        lcd.print(roll, 2);
+                        pwmValue = map(abs((int)roll), 0, 180, 0, 255);
+                        break;
+                    case 1:
+                        lcd.print("Pitch: ");
+                        lcd.print(pitch, 2);
+                        pwmValue = map(abs((int)pitch), 0, 180, 0, 255);
+                        break;
+                    case 2:
+                        lcd.print("Yaw: ");
+                        lcd.print(yaw, 2);
+                        pwmValue = map(abs((int)yaw), 0, 180, 0, 255);
+                        break;
+                }
             }
+
         }
         else {
             Serial.println("Error: Failed to update IMU data");
