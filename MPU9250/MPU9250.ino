@@ -61,8 +61,11 @@ void IMUTask(void * parameter) {
             float ax = IMU.getAccX();
             float ay = IMU.getAccY();
             float az = IMU.getAccZ();
+            float mx = IMU.getMagX();
+            float my = IMU.getMagY();
+            float mz = IMU.getMagZ();
             
-            filter.updateIMU(gx, gy, gz, ax, ay, az);
+            filter.update(gx, gy, gz, ax, ay, az,mx,my,mz);
             
             roll = filter.getRoll() - offsetRoll;
             pitch = filter.getPitch() - offsetPitch;
