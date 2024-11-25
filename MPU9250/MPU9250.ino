@@ -356,8 +356,7 @@ void IMUTask(void* parameter) {
         // 시리얼 및 블루투스 출력
         String output = String("Roll: ") + String(sharedData.roll, 2) +
                        " Pitch: " + String(sharedData.pitch, 2) +
-                       " Yaw: " + String(sharedData.yaw, 2) +
-                       " PWM: " + String(pwmValue);
+                       " Yaw: " + String(sharedData.yaw, 2);
         
         Serial.println(output);
         if (SerialBT.hasClient()) {

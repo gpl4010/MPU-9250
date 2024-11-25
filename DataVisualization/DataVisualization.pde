@@ -243,38 +243,27 @@ void keyPressed() {
 void serialEvent(Serial port) {
     String input = port.readStringUntil('\n');
     if (input != null) {
-        input = input.trim();  // 앞뒤 공백 제거
-        
+        input = input.trim();
         try {
-            // "Roll: " 와 ", Pitch: " 사이의 값 추출
-            int rollStart = input.indexOf("Roll: ") + 6;
-            int rollEnd = input.indexOf(", Pitch: ");
-            String rollStr = input.substring(rollStart, rollEnd);
+            // 정규 표현식을 사용한 더 유연한 파싱
+            String pattern = "Roll: (-?\\d+\\.?\\d*) Pitch: (-?\\d+\\.?\\d*) Yaw: (-?\\d+\\.?\\d*)";
+            java.util.regex.Pattern r = java.util.regex.Pattern.compile(pattern);
+            java.util.regex.Matcher m = r.matcher(input);
             
-            // "Pitch: " 와 ", Yaw: " 사이의 값 추출
-            int pitchStart = input.indexOf("Pitch: ") + 7;
-            int pitchEnd = input.indexOf(", Yaw: ");
-            String pitchStr = input.substring(pitchStart, pitchEnd);
-            
-            // "Yaw: " 이후의 값 추출
-            int yawStart = input.indexOf("Yaw: ") + 5;
-            String yawStr = input.substring(yawStart);
-            
-            // 문자열을 float로 변환
-            roll = float(rollStr);
-            pitch = float(pitchStr);
-            yaw = float(yawStr);
-            
-            // 데이터 추가
-            rollData.add(roll);
-            pitchData.add(pitch);
-            yawData.add(yaw);
-            
-            // 데이터 개수 제한
-            while (rollData.size() > maxDataPoints) {
-                rollData.remove(0);
-                pitchData.remove(0);
-                yawData.remove(0);
+            if (m.find()) {
+                roll = float(m.group(1));
+                pitch = float(m.group(2));
+                yaw = float(m.group(3));
+                
+                rollData.add(roll);
+                pitchData.add(pitch);
+                yawData.add(yaw);
+                
+                while (rollData.size() > maxDataPoints) {
+                    rollData.remove(0);
+                    pitchData.remove(0);
+                    yawData.remove(0);
+                }
             }
         } catch (Exception e) {
             println("Error parsing data: " + input);
