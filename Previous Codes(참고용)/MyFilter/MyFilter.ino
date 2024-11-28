@@ -1,10 +1,5 @@
 #include <Wire.h>
 #include <math.h>
-#include <LiquidCrystal_I2C.h>
-#include <BluetoothSerial.h>
-#include <freertos/FreeRTOS.h>
-#include "esp_timer.h"
-#include <freertos/task.h>
 
 // MPU9250 레지스터 주소
 #define MPU9250_ADDRESS     0x68
@@ -27,36 +22,10 @@
 #define ACC_SCALE       (4.0f / 32768.0f) * 9.81f             // LSB -> m/s^2
 #define MAG_SCALE       (4912.0f / 32760.0f)                  // LSB -> uT
 
-// I2C LCD 객체 생성
-LiquidCrystal_I2C lcd(0x27, 16, 2);
-unsigned long lastLcdUpdate = 0;
-const unsigned long LCD_UPDATE_INTERVAL = 1000;
-
-// Bluetooth 시리얼 객체 생성
-BluetoothSerial SerialBT;
-
-// LED PWM 핀 정의
-const int PWM_PIN = 2;
-int pwmValue = 0;
-
-// 스위치 핀 정의
-const int CALIBRATION_SWITCH = 12;
-const int DISPLAY_SWITCH = 13;
-volatile unsigned long lastDisplaySwitchTime = 0;
-const unsigned long DEBOUNCE_TIME = 200;
-
-
 // 전역 변수
 float gyroBias[3] = {0, 0, 0};
 float accBias[3] = {0, 0, 0};
 float magBias[3] = {0, 0, 0};
-int displayMode = 0;
-float offsetRoll = 0, offsetPitch = 0, offsetYaw = 0;
-volatile bool calibrateFlag = false;
-
-// 태스크 핸들
-TaskHandle_t IMUTaskHandle;
-esp_timer_handle_t timer;
 
 class MyFilter {
 private:
@@ -66,7 +35,7 @@ private:
     
 public:
     MyFilter() {
-        beta = 0.05f;
+        beta = 0.1f;
         q0 = 1.0f;
         q1 = 0.0f;
         q2 = 0.0f;
@@ -243,39 +212,31 @@ void initMPU9250() {
 
 MyFilter filter;
 
-// 공유 데이터 구조체
-struct SharedData {
-    float roll;
-    float pitch;
-    float yaw;
-    portMUX_TYPE mux;
-} sharedData = {0, 0, 0, portMUX_INITIALIZER_UNLOCKED};
-
-// 타이머 인터럽트 핸들러
-void IRAM_ATTR onTimer(void* arg) {
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    vTaskNotifyGiveFromISR(IMUTaskHandle, &xHigherPriorityTaskWoken);
-    if (xHigherPriorityTaskWoken) {
-        portYIELD_FROM_ISR();
-    }
+void setup() {
+    Wire.begin();
+    Wire.setClock(400000);  // 400kHz I2C
+    Serial.begin(115200);
+    
+    Serial.println("Initializing MPU9250...");
+    initMPU9250();
+    delay(1000);
+    
+    Serial.println("Starting gyro calibration...");
+    calibrateGyro();
+    
+    Serial.println("Initialization complete!");
 }
 
-// IMU Task
-void IMUTask(void* parameter) {
-    static uint32_t prev_ms = 0;
-    static float mx = 0, my = 0, mz = 0;
+void loop() {
+    static uint32_t prev_ms = millis();
+    uint32_t now = millis();
+    float dt = (now - prev_ms) / 1000.0f;
     
-    while(true) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        
-        uint32_t now = millis();
-        float dt = (now - prev_ms) / 1000.0f;
-
-        // 센서 데이터 읽기
+    if (now - prev_ms >= 20) {  // 50Hz
         uint8_t Buf[14];
         I2Cread(MPU9250_ADDRESS, 0x3B, 14, Buf);
         
-        // 가속도, 자이로 데이터 처리
+        // 센서 데이터 읽기
         int16_t ax = (Buf[0] << 8) | Buf[1];
         int16_t ay = (Buf[2] << 8) | Buf[3];
         int16_t az = (Buf[4] << 8) | Buf[5];
@@ -292,9 +253,11 @@ void IMUTask(void* parameter) {
         float gy_rads = -(float)(gy - gyroBias[1]) * GYRO_SCALE;
         float gz_rads = (float)(gz - gyroBias[2]) * GYRO_SCALE;
         
-        // 지자기 데이터 업데이트 (100ms마다)
-        static uint32_t mag_update = 0;
-        if (now - mag_update >= 100) {
+        // 지자기 데이터 읽기
+        static uint32_t mag_update = millis();
+        static float mx = 0, my = 0, mz = 0;
+        
+        if (now - mag_update >= 100) {  // 10Hz
             uint8_t ST1;
             I2Cread(MAG_ADDRESS, 0x02, 1, &ST1);
             
@@ -313,23 +276,23 @@ void IMUTask(void* parameter) {
             }
         }
         
-        // 필터 업데이트
+        // My 필터 업데이트
         filter.update(gx_rads, gy_rads, gz_rads, ax_ms2, ay_ms2, az_ms2, mx, my, mz, dt);
         
         // 각도 계산
         float roll, pitch, yaw;
         filter.getAngles(&roll, &pitch, &yaw);
         
-        // 이동 평균 필터
+        // 이동 평균 필터 적용
         #define FILTER_SIZE 5
         static float roll_array[FILTER_SIZE] = {0};
         static float pitch_array[FILTER_SIZE] = {0};
         static float yaw_array[FILTER_SIZE] = {0};
         static int filter_index = 0;
         
-        roll_array[filter_index] = roll - offsetRoll;
-        pitch_array[filter_index] = pitch - offsetPitch;
-        yaw_array[filter_index] = yaw - offsetYaw;
+        roll_array[filter_index] = roll;
+        pitch_array[filter_index] = pitch;
+        yaw_array[filter_index] = yaw;
         filter_index = (filter_index + 1) % FILTER_SIZE;
         
         float roll_filtered = 0, pitch_filtered = 0, yaw_filtered = 0;
@@ -338,204 +301,23 @@ void IMUTask(void* parameter) {
             pitch_filtered += pitch_array[i];
             yaw_filtered += yaw_array[i];
         }
+        roll_filtered /= FILTER_SIZE;
+        pitch_filtered /= FILTER_SIZE;
+        yaw_filtered /= FILTER_SIZE;
         
-        portENTER_CRITICAL(&sharedData.mux);
-        sharedData.roll = roll_filtered / FILTER_SIZE;
-        sharedData.pitch = pitch_filtered / FILTER_SIZE;
-        sharedData.yaw = yaw_filtered / FILTER_SIZE;
-        portEXIT_CRITICAL(&sharedData.mux);
-        
-        // PWM 값 업데이트
-        switch(displayMode) {
-            case 0: pwmValue = map(abs((int)sharedData.roll), 0, 180, 0, 255); break;
-            case 1: pwmValue = map(abs((int)sharedData.pitch), 0, 180, 0, 255); break;
-            case 2: pwmValue = map(abs((int)sharedData.yaw), 0, 180, 0, 255); break;
-        }
-        analogWrite(PWM_PIN, pwmValue);
-        
-        // 시리얼 및 블루투스 출력
-        String output = String("Roll: ") + String(sharedData.roll, 2) +
-                       " Pitch: " + String(sharedData.pitch, 2) +
-                       " Yaw: " + String(sharedData.yaw, 2);
-        
-        Serial.println(output);
-        if (SerialBT.hasClient()) {
-            SerialBT.println(output);
-        }
-        
-        // LCD 업데이트
-        if (now - lastLcdUpdate >= LCD_UPDATE_INTERVAL) {
-            lastLcdUpdate = now;
+        // 결과 출력
+        static uint32_t print_ms = millis();
+        if (now - print_ms >= 50) {  // 20Hz로 출력
+            Serial.print("Roll: ");
+            Serial.print(roll_filtered, 2);
+            Serial.print(" Pitch: ");
+            Serial.print(pitch_filtered, 2);
+            Serial.print(" Yaw: ");
+            Serial.println(yaw_filtered, 2);
             
-            lcd.clear();
-            lcd.setCursor(0, 0);
-            lcd.print("Angle:");
-            lcd.setCursor(0, 1);
-            
-            switch(displayMode) {
-                case 0:
-                    lcd.print("Roll: ");
-                    lcd.print(sharedData.roll, 2);
-                    break;
-                case 1:
-                    lcd.print("Pitch: ");
-                    lcd.print(sharedData.pitch, 2);
-                    break;
-                case 2:
-                    lcd.print("Yaw: ");
-                    lcd.print(sharedData.yaw, 2);
-                    break;
-            }
-        }
-        
-
-        // 캘리브레이션 처리
-        if (calibrateFlag) {
-            offsetRoll = roll;
-            offsetPitch = pitch;
-            offsetYaw = yaw;
-            
-            lcd.clear();
-            lcd.print("Calibrated");
-            Serial.println("Calibrated");
-            vTaskDelay(pdMS_TO_TICKS(1000)); //이거 대신 자이로 캘리브레이션을 넣으면 더 좋지 않을까 싶음
-            calibrateFlag = false;
+            print_ms = now;
         }
         
         prev_ms = now;
     }
-}
-
-void IRAM_ATTR switchISR() {
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    calibrateFlag = true;
-    vTaskNotifyGiveFromISR(IMUTaskHandle, &xHigherPriorityTaskWoken);
-    if (xHigherPriorityTaskWoken) {
-        portYIELD_FROM_ISR();
-    }
-}
-
-void IRAM_ATTR displaySwitchISR() {
-    unsigned long currentTime = millis();
-    if (currentTime - lastDisplaySwitchTime > DEBOUNCE_TIME) {
-        displayMode = (displayMode + 1) % 3;  // 0, 1, 2 순환
-        lastDisplaySwitchTime = currentTime;
-    }
-}
-
-//serial 내 조작
-void printHelp(Stream& stream) {
-    stream.println("Available commands:");
-    stream.println("r: Set display mode to Roll");
-    stream.println("p: Set display mode to Pitch");
-    stream.println("y: Set display mode to Yaw");
-    stream.println("c: Trigger calibration");
-    stream.println("h: Show this help message");
-}
-
-void handleCommand(char cmd, bool isSerial) {
-    Stream* stream;
-    if (isSerial) {
-        stream = &Serial;
-        stream = &SerialBT;
-    } else {
-    }
-
-    switch (cmd) {
-        case 'r':
-        case 'R':
-            displayMode = 0; // Roll
-            stream->println("Display mode set to Roll");
-            break;
-        case 'p':
-        case 'P':
-            displayMode = 1; // Pitch
-            stream->println("Display mode set to Pitch");
-            break;
-        case 'y':
-        case 'Y':
-            displayMode = 2; // Yaw
-            stream->println("Display mode set to Yaw");
-            break;
-        case 'c':
-        case 'C':
-            calibrateFlag = true;
-            stream->println("Calibration triggered");
-            break;
-        case 'h':
-        case 'H':
-            printHelp(*stream);
-            break;
-        default:
-            stream->println("Unknown command. Type 'h' for help.");
-    }
-}
-
-void setup() {
-    // 통신 초기화
-    Serial.begin(115200);
-    Wire.begin();
-    Wire.setClock(400000);
-    
-    // 블루투스 초기화
-    if (!SerialBT.begin("ESP32_IMU")) {
-        Serial.println("Bluetooth initialization failed");
-        while(1) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
-        }
-    }
-    
-    // LCD 초기화
-    lcd.init();
-    lcd.backlight();
-    lcd.print("Initializing...");
-    
-    // MPU9250 초기화
-    initMPU9250();
-    delay(1000);
-    
-    // 자이로 캘리브레이션
-    calibrateGyro();
-    
-    // 핀 연결 설정
-    pinMode(CALIBRATION_SWITCH, INPUT_PULLUP);
-    pinMode(DISPLAY_SWITCH, INPUT_PULLUP);
-    pinMode(PWM_PIN, OUTPUT);
-
-    //스위치 인터럽트 설정
-    attachInterrupt(digitalPinToInterrupt(CALIBRATION_SWITCH), switchISR, FALLING);
-    attachInterrupt(digitalPinToInterrupt(DISPLAY_SWITCH), displaySwitchISR, FALLING);
-    
-    // 타이머 설정
-    const esp_timer_create_args_t timer_args = {
-        .callback = &onTimer,
-        .name = "imu_timer"
-    };
-    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(timer, 40000)); // 40ms
-    
-    // 태스크 생성
-    xTaskCreatePinnedToCore(
-        IMUTask,
-        "IMUTask",
-        4096,
-        NULL,
-        1,
-        &IMUTaskHandle,
-        0
-    );
-    
-    Serial.println("System initialized. Type 'h' for help.");
-    lcd.clear();
-    lcd.print("Ready!");
-}
-
-void loop() {
-    if (Serial.available()) {
-        handleCommand(Serial.read(), true);
-    }
-    if (SerialBT.available()) {
-        handleCommand(SerialBT.read(), false);
-    }
-    vTaskDelay(pdMS_TO_TICKS(100));
 }

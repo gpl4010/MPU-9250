@@ -3,7 +3,6 @@
 
 MPU9250 mpu;
 
-// 칼만 필터 클래스 정의
 class KalmanFilter {
 private:
     float Q_angle, Q_bias;    // 프로세스 노이즈
@@ -27,7 +26,7 @@ public:
     }
     
     float update(float newAngle, float newRate, float dt) {
-        // 시간 업데이트 (예측)
+        // 예측
         angle += dt * (newRate - bias);
         
         P[0][0] += dt * (dt * P[1][1] - P[0][1] - P[1][0] + Q_angle);
@@ -35,7 +34,7 @@ public:
         P[1][0] -= dt * P[1][1];
         P[1][1] += Q_bias * dt;
         
-        // 측정 업데이트 (보정)
+        // 보정작업
         float y = newAngle - angle;
         float S = P[0][0] + R_measure;
         float K[2];
@@ -134,11 +133,11 @@ void loop() {
         float magY = mpu.getMagY();
         float magZ = mpu.getMagZ();
         
-        // 가속도계로부터 각도 계산
+        // Roll,Pitch 계산
         float accRoll = atan2(accY, accZ) * RAD_TO_DEG;
         float accPitch = atan2(-accX, sqrt(accY * accY + accZ * accZ)) * RAD_TO_DEG;
         
-        // 자기장 센서로부터 Yaw 계산
+        //Yaw 계산
         float magYaw = atan2(magY, magX) * RAD_TO_DEG;
         
         // 칼만 필터 적용
@@ -146,14 +145,13 @@ void loop() {
         pitch = kalmanY.update(accPitch, gyroY, dt);
         yaw = kalmanZ.update(magYaw, gyroZ, dt);
         
-        // 결과 출력 (25ms 마다)
+
         static uint32_t prev_ms = millis();
-        if (millis() > prev_ms + 25) {
-            Serial.print("Roll : ");
+        if (millis() > prev_ms + 40) {
             Serial.print(roll, 2);
-            Serial.print("  Pitch : ");
+            Serial.print(",");
             Serial.print(pitch, 2);
-            Serial.print("  Yaw : ");
+            Serial.print(",");
             Serial.println(yaw, 2);
             prev_ms = millis();
         }

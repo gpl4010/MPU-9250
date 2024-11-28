@@ -32,12 +32,11 @@ void loop() {
             float pitch = mpu.getPitch();
             float yaw = mpu.getYaw();
             
-            Serial.print("Roll : ");
-            Serial.print(roll, 2);
-            Serial.print("  Pitch : ");
-            Serial.print(pitch, 2);
-            Serial.print("  Yaw : ");
-            Serial.println(yaw, 2);
+            Serial.print(roll);
+            Serial.print(",");
+            Serial.print(pitch);
+            Serial.print(",");
+            Serial.println(yaw);
             
             prev_ms = millis();
         }

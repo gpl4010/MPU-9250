@@ -163,11 +163,10 @@ void loop() {
             float roll, pitch, yaw;
             ekf.getEulerAngles(roll, pitch, yaw);
             
-            Serial.print("Roll : ");
             Serial.print(roll, 2);
-            Serial.print("  Pitch : ");
+            Serial.print(",");
             Serial.print(pitch, 2);
-            Serial.print("  Yaw : ");
+            Serial.print(",");
             Serial.println(yaw, 2);
             prev_ms = millis();
         }
