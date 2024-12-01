@@ -1,5 +1,5 @@
 // "Roll: 0.00 Pitch: 0.00 Yaw: 0.00" 형식 파싱
-// MPU9250.ino파일용
+// Main.ino 파일용 파싱
 
 import processing.serial.*;
 
@@ -183,9 +183,9 @@ void draw3D() {
     
     // IMU 모델 그리기
     pushMatrix();
+    rotateZ(radians(-roll));
     rotateX(radians(pitch));
     rotateY(radians(yaw));
-    rotateZ(radians(-roll));
     drawIMU();
     popMatrix();
     

@@ -3,7 +3,7 @@
 
 MPU9250 mpu;
 
-// 현재 각도 저장 변수
+// 각도 저장 변수
 float roll = 0, pitch = 0, yaw = 0;
 float accRoll = 0, accPitch=0,magYaw=0;
 unsigned long prevTime = 0;
@@ -14,7 +14,7 @@ void setup() {
     
     if (!mpu.setup(0x68)) {
         while (1) {
-            Serial.println("MPU connection failed!");
+            Serial.println("센서 연결 실패");
             delay(5000);
         }
     }
@@ -43,6 +43,7 @@ void loop() {
     if (mpu.update()) {
         calculateAngles();
 
+
         //Serial.print(roll, 2);
         //Serial.print(",");
         //Serial.print(pitch, 2);
@@ -55,5 +56,5 @@ void loop() {
         Serial.print(",");
         Serial.println(magYaw, 2);
     }
-    delay(20); // 50Hz
+    delay(20);
 }

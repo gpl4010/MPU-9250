@@ -8,9 +8,9 @@ void setup() {
     Wire.begin();
     
     // MPU9250 초기화
-    if (!mpu.setup(0x68)) {  // I2C 주소는 일반적으로 0x68입니다
+    if (!mpu.setup(0x68)) {
         while (1) {
-            Serial.println("MPU9250 연결 실패!");
+            Serial.println("센서 연결 실패!");
             delay(5000);
         }
     }
@@ -27,7 +27,7 @@ void setup() {
 void loop() {
     if (mpu.update()) {
         static uint32_t prev_ms = millis();
-        if (millis() > prev_ms + 25) {  // 40Hz로 데이터 출력
+        if (millis() > prev_ms + 40) { 
             float roll = mpu.getRoll();
             float pitch = mpu.getPitch();
             float yaw = mpu.getYaw();

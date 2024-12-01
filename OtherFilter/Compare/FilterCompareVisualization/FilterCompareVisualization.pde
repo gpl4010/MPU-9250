@@ -130,13 +130,13 @@ void serialEvent(Serial port) {
                 
                 // 데이터 저장
                 adMyFilter_Pitch(MyFilter_Roll, a);
-                adMyFilter_Pitch(Rawdata_Roll, b);
-                adMyFilter_Pitch(KalmanFilter_Roll, c);
-                adMyFilter_Pitch(MyFilter_Pitch, d);
+                adMyFilter_Pitch(Rawdata_Roll, d);
+                adMyFilter_Pitch(KalmanFilter_Roll, g);
+                adMyFilter_Pitch(MyFilter_Pitch, b);
                 adMyFilter_Pitch(Rawdata_Pitch, e);
-                adMyFilter_Pitch(KalmanFilter_Pitch, f);
-                adMyFilter_Pitch(MyFilter_Yaw, g);
-                adMyFilter_Pitch(Rawdata_Yaw, h);
+                adMyFilter_Pitch(KalmanFilter_Pitch, h);
+                adMyFilter_Pitch(MyFilter_Yaw, c);
+                adMyFilter_Pitch(Rawdata_Yaw, f);
                 adMyFilter_Pitch(KalmanFilter_Yaw, i);
                 
             } catch (Exception e) {

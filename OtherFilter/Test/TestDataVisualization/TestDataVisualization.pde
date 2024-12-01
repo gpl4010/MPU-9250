@@ -20,7 +20,7 @@ float leftMargin = 60;
 float rightMargin = 30;
 float topMargin = 30;
 float bottomMargin = 30;
-float subplotSpacing = 20;
+float subplotSpacing = 40;
 
 // 색상 설정
 color textColor = color(0);
@@ -75,17 +75,24 @@ void draw2D() {
     float subplotHeight = (height - topMargin - bottomMargin - 2 * subplotSpacing) / 3;
     float graphWidth = width - leftMargin - rightMargin;
     
-    drawSubplot(rollData, "Roll (degrees)", color(255, 0, 0), 
+    drawSubplot(rollData, "", color(255, 0, 0), 
                leftMargin, topMargin, 
                graphWidth, subplotHeight);
                
-    drawSubplot(pitchData, "Pitch (degrees)", color(0, 255, 0),
+    drawSubplot(pitchData, "", color(0, 255, 0),
                leftMargin, topMargin + subplotHeight + subplotSpacing,
                graphWidth, subplotHeight);
                
-    drawSubplot(yawData, "Yaw (degrees)", color(0, 0, 255),
+    drawSubplot(yawData, "", color(0, 0, 255),
                leftMargin, topMargin + 2 * (subplotHeight + subplotSpacing),
                graphWidth, subplotHeight);
+    
+    //각 그래프 이름 중앙 출력
+    fill(textColor);
+    textAlign(CENTER);
+    text("Roll (degrees)", width/2, topMargin - 15);
+    text("Pitch (degrees)", width/2, topMargin + subplotHeight + subplotSpacing -15);
+    text("Yaw (degrees)", width/2, topMargin + 2 * (subplotHeight + subplotSpacing) - 15);
     
     fill(textColor);
     textAlign(CENTER);
@@ -173,9 +180,9 @@ void draw3D() {
     
     // IMU 모델 그리기
     pushMatrix();
+    rotateZ(radians(-roll));
     rotateX(radians(pitch));
     rotateY(radians(yaw));
-    rotateZ(radians(-roll));
     drawIMU();
     popMatrix();
     
@@ -195,22 +202,59 @@ void draw3D() {
 }
 
 void drawIMU() {
-    // IMU 본체
-    fill(200);
-    box(400, 80, 240);  // x: 80, y: 240, z: 400 으로 변경
+    // 차체 색상
+    fill(200, 0, 0);  // 빨간색 차체
+    noStroke();
     
-    // 전면 표시 (빨간색)
+    // 메인 차체
     pushMatrix();
-    translate(0, 0, 200);  // z축으로 이동
-    fill(255, 0, 0);
-    box(80, 80, 20);      // 크기도 조정
+    translate(0, -20, 0);
+    box(300, 60, 140);  // 본체
+    
+    // 차 지붕
+    translate(0, -40, 0);
+    box(200, 40, 120);  // 좀 더 작은 지붕
     popMatrix();
     
-    // 윗면 표시 (초록색)
+    // 창문 (검은색)
+    fill(30);
     pushMatrix();
-    translate(0, -120, 0);  // y축으로만 이동
-    fill(0, 255, 0);
-    box(80, 20, 80);       // 크기 유지
+    translate(0, -80, 0);
+    box(150, 1, 100);  // 윗창문
+    popMatrix();
+    
+    // 바퀴 (검은색)
+    fill(30);
+    pushMatrix();
+    translate(80, 20, 75);  // 앞 오른쪽
+    sphere(20);
+    popMatrix();
+    
+    pushMatrix();
+    translate(80, 20, -75);  // 앞 왼쪽
+    sphere(20);
+    popMatrix();
+    
+    pushMatrix();
+    translate(-80, 20, 75);  // 뒤 오른쪽
+    sphere(20);
+    popMatrix();
+    
+    pushMatrix();
+    translate(-80, 20, -75);  // 뒤 왼쪽
+    sphere(20);
+    popMatrix();
+    
+    // 전조등 (노란색)
+    fill(255, 255, 0);
+    pushMatrix();
+    translate(150, -20, 50);
+    box(10, 20, 30);
+    popMatrix();
+    
+    pushMatrix();
+    translate(150, -20, -50);
+    box(10, 20, 30);
     popMatrix();
 }
 
