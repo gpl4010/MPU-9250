@@ -6,11 +6,10 @@
 #include "esp_timer.h"
 #include <freertos/task.h>
 
-// MPU9250 레지스터 주소
+// MPU9250 레지스터 주소 설정
 #define MPU9250_ADDRESS     0x68
 #define MAG_ADDRESS         0x0C
 
-// MPU9250 레지스터 맵
 #define PWR_MGMT_1         0x6B
 #define CONFIG             0x1A
 #define GYRO_CONFIG        0x1B
@@ -42,7 +41,8 @@ int pwmValue = 0;
 // 스위치 핀 정의
 const int CALIBRATION_SWITCH = 12;
 const int DISPLAY_SWITCH = 13;
-
+volatile unsigned long lastDisplaySwitchTime = 0;
+const unsigned long DEBOUNCE_TIME = 200;
 
 // 전역 변수
 float gyroBias[3] = {0, 0, 0};
@@ -64,7 +64,7 @@ private:
     
 public:
     MyFilter() {
-        beta = 0.05f;
+        beta = 0.046f;
         q0 = 1.0f;
         q1 = 0.0f;
         q2 = 0.0f;
@@ -159,9 +159,15 @@ public:
     }
 
     void getAngles(float* roll, float* pitch, float* yaw) {
-        *roll = atan2(2.0f * (q0 * q1 + q2 * q3), 1.0f - 2.0f * (q1 * q1 + q2 * q2)) * 180.0f / PI;
-        *pitch = asin(2.0f * (q0 * q2 - q3 * q1)) * 180.0f / PI;
-        *yaw = atan2(2.0f * (q0 * q3 + q1 * q2), 1.0f - 2.0f * (q2 * q2 + q3 * q3)) * 180.0f / PI;
+    float R11 = 1.0f - 2.0f * (q2 * q2 + q3 * q3);
+    float R21 = 2.0f * (q1 * q2 + q0 * q3);
+    float R31 = 2.0f * (q1 * q3 - q0 * q2);
+    float R32 = 2.0f * (q2 * q3 + q0 * q1);
+    float R33 = 1.0f - 2.0f * (q1 * q1 + q2 * q2);
+
+    *roll = atan2(R32, R33) * 180.0f / PI;
+    *pitch = atan2(-R31, sqrt(R32 * R32 + R33 * R33)) * 180.0f / PI;
+    *yaw = atan2(R21, R11) * 180.0f / PI;
     }
 };
 
@@ -185,32 +191,78 @@ void I2CwriteByte(uint8_t Address, uint8_t Register, uint8_t Data) {
 
 void calibrateGyro() {
     float sumX = 0, sumY = 0, sumZ = 0;
+    float accSumX = 0, accSumY = 0, accSumZ = 0;
+    float magSumX = 0, magSumY = 0, magSumZ = 0;
     const int samples = 1000;
     
-    Serial.println("Calibrating gyroscope... Keep the sensor still!");
+    Serial.println("센서 초기화를 진행 중 입니다...");
+    Serial.println("센서를 움직이지 마세요");
     
+    // 자이로, 가속도 데이터 샘플링
     for(int i = 0; i < samples; i++) {
         uint8_t Buf[14];
         I2Cread(MPU9250_ADDRESS, 0x3B, 14, Buf);
         
+        // 가속도 데이터
+        int16_t ax = (Buf[0] << 8) | Buf[1];
+        int16_t ay = (Buf[2] << 8) | Buf[3];
+        int16_t az = (Buf[4] << 8) | Buf[5];
+        
+        // 자이로 데이터
         int16_t gx = (Buf[8] << 8) | Buf[9];
         int16_t gy = (Buf[10] << 8) | Buf[11];
         int16_t gz = (Buf[12] << 8) | Buf[13];
         
+        accSumX += ax;
+        accSumY += ay;
+        accSumZ += az;
+        
         sumX += gx;
         sumY += gy;
         sumZ += gz;
+        
+        //진행도 출력
+        if(i % 100 == 0) {
+            Serial.print("Progress: ");
+            Serial.print((i * 100) / samples);
+            Serial.println("%");
+        }
+        
         delay(1);
     }
     
+    // 지자기 센서 데이터 수집
+    for(int i = 0; i < samples/10; i++) {  // 지자기 센서는 더 낮은 샘플링 레이트
+        uint8_t ST1;
+        I2Cread(MAG_ADDRESS, 0x02, 1, &ST1);
+        
+        if (ST1 & 0x01) {
+            uint8_t Mag[7];
+            I2Cread(MAG_ADDRESS, 0x03, 7, Mag);
+            
+            int16_t mx = (Mag[1] << 8) | Mag[0];
+            int16_t my = (Mag[3] << 8) | Mag[2];
+            int16_t mz = (Mag[5] << 8) | Mag[4];
+            
+            magSumX += mx;
+            magSumY += my;
+            magSumZ += mz;
+        }
+        delay(10);
+    }
+    
+    // 평균 계산하여 바이어스 값 설정
     gyroBias[0] = sumX / samples;
     gyroBias[1] = sumY / samples;
     gyroBias[2] = sumZ / samples;
     
-    Serial.println("Gyro calibration complete!");
-    Serial.print("Bias X: "); Serial.println(gyroBias[0]);
-    Serial.print("Bias Y: "); Serial.println(gyroBias[1]);
-    Serial.print("Bias Z: "); Serial.println(gyroBias[2]);
+    accBias[0] = accSumX / samples;
+    accBias[1] = accSumY / samples;
+    accBias[2] = (accSumZ / samples) - (32768 / ACC_SCALE); // 중력 가속도 보정
+    
+    magBias[0] = magSumX / (samples/10);
+    magBias[1] = magSumY / (samples/10);
+    magBias[2] = magSumZ / (samples/10);
 }
 
 void initMPU9250() {
@@ -241,7 +293,6 @@ void initMPU9250() {
 
 MyFilter filter;
 
-// 공유 데이터 구조체
 struct SharedData {
     float roll;
     float pitch;
@@ -256,6 +307,16 @@ void IRAM_ATTR onTimer(void* arg) {
     if (xHigherPriorityTaskWoken) {
         portYIELD_FROM_ISR();
     }
+}
+
+//LED PWM 제어
+void ledPwm(){
+    switch(displayMode) {
+      case 0: pwmValue = map(abs((int)sharedData.roll), 0, 180, 0, 20); break;
+      case 1: pwmValue = map(abs((int)sharedData.pitch), 0, 180, 0, 20); break;
+      case 2: pwmValue = map(abs((int)sharedData.yaw), 0, 180, 0, 20); break;
+    }
+    analogWrite(PWM_PIN, pwmValue);
 }
 
 // IMU Task
@@ -343,19 +404,13 @@ void IMUTask(void* parameter) {
         sharedData.yaw = yaw_filtered / FILTER_SIZE;
         portEXIT_CRITICAL(&sharedData.mux);
         
-        // PWM 값 업데이트
-        switch(displayMode) {
-            case 0: pwmValue = map(abs((int)sharedData.roll), 0, 180, 0, 255); break;
-            case 1: pwmValue = map(abs((int)sharedData.pitch), 0, 180, 0, 255); break;
-            case 2: pwmValue = map(abs((int)sharedData.yaw), 0, 180, 0, 255); break;
-        }
-        analogWrite(PWM_PIN, pwmValue);
+        // LED PWM 제어
+        ledPwm();
         
         // 시리얼 및 블루투스 출력
         String output = String("Roll: ") + String(sharedData.roll, 2) +
                        " Pitch: " + String(sharedData.pitch, 2) +
-                       " Yaw: " + String(sharedData.yaw, 2) +
-                       " PWM: " + String(pwmValue);
+                       " Yaw: " + String(sharedData.yaw, 2);
         
         Serial.println(output);
         if (SerialBT.hasClient()) {
@@ -411,6 +466,14 @@ void IRAM_ATTR switchISR() {
     vTaskNotifyGiveFromISR(IMUTaskHandle, &xHigherPriorityTaskWoken);
     if (xHigherPriorityTaskWoken) {
         portYIELD_FROM_ISR();
+    }
+}
+
+void IRAM_ATTR displaySwitchISR() {
+    unsigned long currentTime = millis();
+    if (currentTime - lastDisplaySwitchTime > DEBOUNCE_TIME) {
+        displayMode = (displayMode + 1) % 3;  // 0, 1, 2 순환
+        lastDisplaySwitchTime = currentTime;
     }
 }
 
@@ -488,11 +551,14 @@ void setup() {
     // 자이로 캘리브레이션
     calibrateGyro();
     
-    // 핀 설정
+    // 핀 연결 설정
     pinMode(CALIBRATION_SWITCH, INPUT_PULLUP);
     pinMode(DISPLAY_SWITCH, INPUT_PULLUP);
     pinMode(PWM_PIN, OUTPUT);
+
+    //스위치 인터럽트 설정
     attachInterrupt(digitalPinToInterrupt(CALIBRATION_SWITCH), switchISR, FALLING);
+    attachInterrupt(digitalPinToInterrupt(DISPLAY_SWITCH), displaySwitchISR, FALLING);
     
     // 타이머 설정
     const esp_timer_create_args_t timer_args = {
@@ -513,9 +579,9 @@ void setup() {
         0
     );
     
-    Serial.println("System initialized. Type 'h' for help.");
+    Serial.println("시스템 초기화. 'H'/'h'를 통해 키 확인");
     lcd.clear();
-    lcd.print("Ready!");
+    lcd.print("Ready");
 }
 
 void loop() {
