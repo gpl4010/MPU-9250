@@ -168,7 +168,7 @@ void drawSubplot(ArrayList<Float> data, String title, color plotColor,
     }
 }
 
-void draw3D() {
+void draw3D() { //rotate함수에 부자연스러운 움직임있어 행렬로 구현
     hint(ENABLE_DEPTH_TEST);
     camera();
     lights();
@@ -183,18 +183,37 @@ void draw3D() {
     
     // IMU 모델 그리기
     pushMatrix();
-    rotateZ(radians(-roll));
-    rotateX(radians(pitch));
-    rotateY(radians(yaw));
+    
+    // 고정 회로에 맞추어 변경
+    float yawRad = radians(-pitch);
+    float pitchRad = radians(yaw);
+    float rollRad = radians(roll);
+    
+    // 회전 행렬 계산 및 적용
+    float cy = cos(yawRad);
+    float sy = sin(yawRad);
+    float cp = cos(pitchRad);
+    float sp = sin(pitchRad);
+    float cr = cos(rollRad);
+    float sr = sin(rollRad);
+    
+    // YPR 순서의 회전 행렬
+    applyMatrix(
+        cy*cp,  cy*sp*sr - sy*cr,  cy*sp*cr + sy*sr,  0,
+        sy*cp,  sy*sp*sr + cy*cr,  sy*sp*cr - cy*sr,  0,
+        -sp,    cp*sr,             cp*cr,             0,
+        0,      0,                 0,                 1
+    );
+    
     drawIMU();
     popMatrix();
     
     // 각도 정보 표시
-     camera();
+    camera();
     hint(DISABLE_DEPTH_TEST);
     noLights();
     
-    textSize(24);  // 텍스트 크기 증가
+    textSize(24);
     fill(textColor);
     textAlign(LEFT, TOP);
     text("Roll: " + nfp(roll, 0, 1) + "°", 30, 30);

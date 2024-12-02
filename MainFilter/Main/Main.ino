@@ -309,6 +309,16 @@ void IRAM_ATTR onTimer(void* arg) {
     }
 }
 
+//LED PWM 제어
+void ledPwm(){
+    switch(displayMode) {
+      case 0: pwmValue = map(abs((int)sharedData.roll), 0, 180, 0, 20); break;
+      case 1: pwmValue = map(abs((int)sharedData.pitch), 0, 180, 0, 20); break;
+      case 2: pwmValue = map(abs((int)sharedData.yaw), 0, 180, 0, 20); break;
+    }
+    analogWrite(PWM_PIN, pwmValue);
+}
+
 // IMU Task
 void IMUTask(void* parameter) {
     static uint32_t prev_ms = 0;
@@ -394,13 +404,8 @@ void IMUTask(void* parameter) {
         sharedData.yaw = yaw_filtered / FILTER_SIZE;
         portEXIT_CRITICAL(&sharedData.mux);
         
-        // PWM 값 업데이트
-        switch(displayMode) {
-            case 0: pwmValue = map(abs((int)sharedData.roll), 0, 180, 0, 255); break;
-            case 1: pwmValue = map(abs((int)sharedData.pitch), 0, 180, 0, 255); break;
-            case 2: pwmValue = map(abs((int)sharedData.yaw), 0, 180, 0, 255); break;
-        }
-        analogWrite(PWM_PIN, pwmValue);
+        // LED PWM 제어
+        ledPwm();
         
         // 시리얼 및 블루투스 출력
         String output = String("Roll: ") + String(sharedData.roll, 2) +
