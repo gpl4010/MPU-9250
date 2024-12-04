@@ -5,6 +5,9 @@
 #include <freertos/FreeRTOS.h>
 #include "esp_timer.h"
 #include <freertos/task.h>
+#include "eigen.h"
+
+using namespace Eigen;
 
 // MPU9250 레지스터 주소 설정
 #define MPU9250_ADDRESS     0x68
@@ -56,124 +59,129 @@ volatile bool calibrateFlag = false;
 TaskHandle_t IMUTaskHandle;
 esp_timer_handle_t timer;
 
-class MyFilter {
+const float D2R = PI/180.0f;
+const float R2D = 180.0f/PI;
+
+class KalmanFilter {
 private:
-    float beta;
-    float q0, q1, q2, q3;
-    float sampleFreq;
-    
-public:
-    MyFilter() {
-        beta = 0.046f;
-        q0 = 1.0f;
-        q1 = 0.0f;
-        q2 = 0.0f;
-        q3 = 0.0f;
-        sampleFreq = 50.0f;  // 50Hz로 수정
+    Matrix<float, 7, 1> x_state;  // [q0, q1, q2, q3, wx_bias, wy_bias, wz_bias]
+    Matrix<float, 7, 7> P_cov;    
+    Matrix<float, 7, 7> Q_noise;  
+    Matrix<float, 3, 3> R_noise;
+    float dt;
+
+    void normalizeQuaternion() {
+        float norm = sqrt(x_state(0)*x_state(0) + x_state(1)*x_state(1) + 
+                         x_state(2)*x_state(2) + x_state(3)*x_state(3));
+        x_state(0) /= norm;
+        x_state(1) /= norm;
+        x_state(2) /= norm;
+        x_state(3) /= norm;
     }
-    
+
+    Matrix<float, 3, 3> inverse3x3(const Matrix<float, 3, 3>& A) {
+        Matrix<float, 3, 3> result;
+        float det = A(0,0)*(A(1,1)*A(2,2)-A(1,2)*A(2,1)) - 
+                   A(0,1)*(A(1,0)*A(2,2)-A(1,2)*A(2,0)) + 
+                   A(0,2)*(A(1,0)*A(2,1)-A(1,1)*A(2,0));
+        float invdet = 1/det;
+        
+        result(0,0) = (A(1,1)*A(2,2)-A(1,2)*A(2,1))*invdet;
+        result(0,1) = (A(0,2)*A(2,1)-A(0,1)*A(2,2))*invdet;
+        result(0,2) = (A(0,1)*A(1,2)-A(0,2)*A(1,1))*invdet;
+        result(1,0) = (A(1,2)*A(2,0)-A(1,0)*A(2,2))*invdet;
+        result(1,1) = (A(0,0)*A(2,2)-A(0,2)*A(2,0))*invdet;
+        result(1,2) = (A(0,2)*A(1,0)-A(0,0)*A(1,2))*invdet;
+        result(2,0) = (A(1,0)*A(2,1)-A(1,1)*A(2,0))*invdet;
+        result(2,1) = (A(0,1)*A(2,0)-A(0,0)*A(2,1))*invdet;
+        result(2,2) = (A(0,0)*A(1,1)-A(0,1)*A(1,0))*invdet;
+        return result;
+    }
+
+public:
+    KalmanFilter() : dt(0.04f) {
+        x_state.setZero();
+        x_state(0) = 1.0f;  // 쿼터니언 초기화 [1,0,0,0]
+        
+        P_cov.setIdentity();
+        P_cov *= 0.1f;
+
+        Q_noise.setIdentity();
+        Q_noise.block<4,4>(0,0) *= 0.001f;
+        Q_noise.block<3,3>(4,4) *= 0.003f;
+
+        R_noise.setIdentity();
+        R_noise *= 0.3f;
+    }
+
     void update(float gx, float gy, float gz, float ax, float ay, float az, float mx, float my, float mz, float dt) {
-        float recipNorm;
-        float s0, s1, s2, s3;
-        float qDot1, qDot2, qDot3, qDot4;
-        float hx, hy;
-        float _2q0mx, _2q0my, _2q0mz, _2q1mx, _2bx, _2bz;
-        float _4bx, _4bz, _2q0, _2q1, _2q2, _2q3;
-        float q0q0, q0q1, q0q2, q0q3, q1q1, q1q2, q1q3, q2q2, q2q3, q3q3;
+        float q0 = x_state(0), q1 = x_state(1), q2 = x_state(2), q3 = x_state(3);
+        float wx = gx - x_state(4);
+        float wy = gy - x_state(5);
+        float wz = gz - x_state(6);
 
-        // 가속도계 정규화
-        recipNorm = 1.0f / sqrt(ax * ax + ay * ay + az * az);
-        ax *= recipNorm;
-        ay *= recipNorm;
-        az *= recipNorm;
+        // 쿼터니언 미분 방정식
+        Matrix<float, 4, 1> q_dot;
+        q_dot(0) = 0.5f * (-q1*wx - q2*wy - q3*wz);
+        q_dot(1) = 0.5f * (q0*wx + q2*wz - q3*wy);
+        q_dot(2) = 0.5f * (q0*wy - q1*wz + q3*wx);
+        q_dot(3) = 0.5f * (q0*wz + q1*wy - q2*wx);
 
-        // 지자기 정규화
-        recipNorm = 1.0f / sqrt(mx * mx + my * my + mz * mz);
-        mx *= recipNorm;
-        my *= recipNorm;
-        mz *= recipNorm;
+        // 상태 예측
+        x_state.block<4,1>(0,0) += q_dot * dt;
+        normalizeQuaternion();
 
-        // 보조 변수
-        q0q0 = q0 * q0;
-        q0q1 = q0 * q1;
-        q0q2 = q0 * q2;
-        q0q3 = q0 * q3;
-        q1q1 = q1 * q1;
-        q1q2 = q1 * q2;
-        q1q3 = q1 * q3;
-        q2q2 = q2 * q2;
-        q2q3 = q2 * q3;
-        q3q3 = q3 * q3;
+        // 공분산 예측
+        Matrix<float, 7, 7> F = Matrix<float, 7, 7>::Identity();
+        F.block<4,4>(0,0) += Matrix<float, 4, 4>::Identity() * dt;
+        P_cov = F * P_cov * F.transpose() + Q_noise;
 
-        // 쿼터니언 미분값 계산
-        qDot1 = 0.5f * (-q1 * gx - q2 * gy - q3 * gz);
-        qDot2 = 0.5f * (q0 * gx + q2 * gz - q3 * gy);
-        qDot3 = 0.5f * (q0 * gy - q1 * gz + q3 * gx);
-        qDot4 = 0.5f * (q0 * gz + q1 * gy - q2 * gx);
+        // 측정 업데이트
+        float acc_norm = sqrt(ax*ax + ay*ay + az*az);
+        if(acc_norm > 0.1f) {
+            ax /= acc_norm;
+            ay /= acc_norm;
+            az /= acc_norm;
 
-        // 가속도계 보정
-        if(!((ax == 0.0f) && (ay == 0.0f) && (az == 0.0f))) {
-            // 정규화된 중력 벡터
-            float _2q0 = 2.0f * q0;
-            float _2q1 = 2.0f * q1;
-            float _2q2 = 2.0f * q2;
-            float _2q3 = 2.0f * q3;
-            float _4q0 = 4.0f * q0;
-            float _4q1 = 4.0f * q1;
-            float _4q2 = 4.0f * q2;
-            float _8q1 = 8.0f * q1;
-            float _8q2 = 8.0f * q2;
+            // 예측된 중력 방향
+            Matrix<float, 3, 1> g_pred;
+            g_pred(0) = 2*(q1*q3 - q0*q2);
+            g_pred(1) = 2*(q2*q3 + q0*q1);
+            g_pred(2) = q0*q0 - q1*q1 - q2*q2 + q3*q3;
 
-            // 기울기 계산
-            s0 = _4q0 * q2q2 + _2q2 * ax + _4q0 * q1q1 - _2q1 * ay;
-            s1 = _4q1 * q3q3 - _2q3 * ax + 4.0f * q0q0 * q1 - _2q0 * ay - _4q1 + _8q1 * q1q1 + _8q1 * q2q2 + _4q1 * az;
-            s2 = 4.0f * q0q0 * q2 + _2q0 * ax + _4q2 * q3q3 - _2q3 * ay - _4q2 + _8q2 * q1q1 + _8q2 * q2q2 + _4q2 * az;
-            s3 = 4.0f * q1q1 * q3 - _2q1 * ax + 4.0f * q2q2 * q3 - _2q2 * ay;
+            // 측정값
+            Matrix<float, 3, 1> z;
+            z << ax, ay, az;
 
-            // 정규화
-            recipNorm = 1.0f / sqrt(s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3);
-            s0 *= recipNorm;
-            s1 *= recipNorm;
-            s2 *= recipNorm;
-            s3 *= recipNorm;
+            // 측정 자코비안
+            Matrix<float, 3, 7> H;
+            H.setZero();
+            H.block<3,4>(0,0) << -2*q2,  2*q3, -2*q0,  2*q1,
+                                 2*q1,  2*q0,  2*q3,  2*q2,
+                                 2*q0, -2*q1, -2*q2,  2*q3;
 
-            // 쿼터니언 변화율 적용
-            qDot1 -= beta * s0;
-            qDot2 -= beta * s1;
-            qDot3 -= beta * s2;
-            qDot4 -= beta * s3;
+            Matrix<float, 3, 3> S = H * P_cov * H.transpose() + R_noise;
+            Matrix<float, 7, 3> K = P_cov * H.transpose() * inverse3x3(S);
+
+            x_state += K * (z - g_pred);
+            P_cov = (Matrix<float, 7, 7>::Identity() - K * H) * P_cov;
+            
+            normalizeQuaternion();
         }
-
-        // 쿼터니언 적분
-        q0 += qDot1 * dt;
-        q1 += qDot2 * dt;
-        q2 += qDot3 * dt;
-        q3 += qDot4 * dt;
-
-        // 정규화
-        recipNorm = 1.0f / sqrt(q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3);
-        q0 *= recipNorm;
-        q1 *= recipNorm;
-        q2 *= recipNorm;
-        q3 *= recipNorm;
     }
 
     void getAngles(float* roll, float* pitch, float* yaw) {
-    float q0q0 = q0 * q0;
-    float q1q1 = q1 * q1;
-    float q2q2 = q2 * q2;
-    float q3q3 = q3 * q3;
-    
-    // YXZ 순서로 회전 변환
-    *yaw = atan2(2.0f * (q0 * q3 - q1 * q2), q0q0 + q1q1 - q2q2 - q3q3) * 180.0f / PI;
-    *pitch = atan2(2.0f * (q0 * q2 - q1 * q3), q0q0 - q1q1 - q2q2 + q3q3) * 180.0f / PI;
-    *roll = atan2(2.0f * (q0 * q1 + q2 * q3), q0q0 - q1q1 + q2q2 - q3q3) * 180.0f / PI;
-
-    // 각도 180도 제한
-    *yaw = fmod(*yaw + 180.0f + 360.0f, 360.0f) - 180.0f;
-    *pitch = fmod(*pitch + 180.0f + 360.0f, 360.0f) - 180.0f;
-    *roll = fmod(*roll + 180.0f + 360.0f, 360.0f) - 180.0f;
-}
+        float q0 = x_state(0), q1 = x_state(1), q2 = x_state(2), q3 = x_state(3);
+        
+        *roll = atan2(2*(q0*q1 + q2*q3), 1 - 2*(q1*q1 + q2*q2)) * R2D;
+        *pitch = asin(2*(q0*q2 - q3*q1)) * R2D;
+        *yaw = atan2(2*(q0*q3 + q1*q2), 1 - 2*(q2*q2 + q3*q3)) * R2D;
+        
+        // -180 ~ 180 정규화
+        *roll = fmod(*roll + 180.0f + 360.0f, 360.0f) - 180.0f;
+        *pitch = fmod(*pitch + 180.0f + 360.0f, 360.0f) - 180.0f;
+        *yaw = fmod(*yaw + 180.0f + 360.0f, 360.0f) - 180.0f;
+    }
 };
 
 void I2Cread(uint8_t Address, uint8_t Register, uint8_t Nbytes, uint8_t* Data) {
@@ -296,7 +304,7 @@ void initMPU9250() {
     delay(10);
 }
 
-MyFilter filter;
+KalmanFilter filter;
 
 struct SharedData {
     float roll;

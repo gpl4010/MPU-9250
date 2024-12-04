@@ -187,7 +187,7 @@ void draw3D() { //rotate함수에 부자연스러운 움직임있어 행렬로 �
     // 고정 회로에 맞추어 변경
     float yawRad = radians(-pitch);
     float pitchRad = radians(yaw);
-    float rollRad = radians(roll);
+    float rollRad = radians(-roll);
     
     // 회전 행렬 계산 및 적용
     float cy = cos(yawRad);
